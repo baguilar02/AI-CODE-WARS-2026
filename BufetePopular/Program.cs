@@ -16,7 +16,10 @@ builder.Services.AddSingleton(
 var app = builder.Build();
 
 // PÁGINA PRINCIPAL DEL BUFETE POPULAR
-app.MapGet("/", () => Results.Content("""
+app.MapGet("/", (OrganizadorExpedientes organizador) =>
+{
+    var listaInicio = organizador.ListarExpedientes();
+    var paginaInicio = """
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -329,25 +332,24 @@ footer {
         <div class="stats-grid">
 
             <div class="stat">
-                <strong>—</strong>
+                <strong>TOTAL_ABIERTOS</strong>
                 <p>Expedientes abiertos</p>
             </div>
 
             <div class="stat">
-                <strong>—</strong>
+                <strong>TOTAL_SEGUIMIENTO</strong>
                 <p>En seguimiento</p>
             </div>
 
             <div class="stat">
-                <strong>—</strong>
+                <strong>TOTAL_CERRADOS</strong>
                 <p>Expedientes cerrados</p>
             </div>
 
         </div>
 
         <p class="note">
-            Las estadísticas se actualizarán al conectar
-            el módulo de gestión de expedientes.
+            Cantidades actualizadas con los expedientes registrados.
         </p>
     </section>
 
@@ -361,9 +363,13 @@ footer {
 
 </body>
 </html>
-""", "text/html; charset=utf-8"));
-
-// PÁGINAS TEMPORALES PARA INTEGRACIÓN CON LOS DEMÁS MÓDULOS
+""";
+    paginaInicio = paginaInicio
+        .Replace("TOTAL_ABIERTOS", listaInicio.Count(e => e.Estado == "Abierto").ToString())
+        .Replace("TOTAL_SEGUIMIENTO", listaInicio.Count(e => e.Estado == "En seguimiento").ToString())
+        .Replace("TOTAL_CERRADOS", listaInicio.Count(e => e.Estado == "Cerrado").ToString());
+    return Results.Content(paginaInicio, "text/html; charset=utf-8");
+});
 
 //
 // MÓDULO DE ORGANIZACIÓN DE EXPEDIENTES
@@ -576,12 +582,6 @@ app.MapGet("/expedientes/{id}",
                 "</form>"
             );
         }
-
-        html.Append(
-            "<p><a href='/historial/" +
-            Uri.EscapeDataString(e.Id) +
-            "'>Registrar actividades y consultar seguimiento</a></p>"
-        );
 
         html.Append("<h2>Historial</h2>");
 

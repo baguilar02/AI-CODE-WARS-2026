@@ -160,16 +160,14 @@ namespace AICodeWars
             }
         }
 
+        // Cambia únicamente de Abierto a En seguimiento.
         public void IniciarSeguimiento(string id)
         {
             lock (bloqueo)
             {
                 var e = BuscarInterno(id);
-
                 if (e.Estado != "Abierto")
-                    throw new InvalidOperationException(
-                        "Solo los expedientes abiertos pueden pasar a seguimiento.");
-
+                    throw new InvalidOperationException("Solo un expediente abierto puede pasar a seguimiento.");
                 e.Estado = "En seguimiento";
                 e.Historial.Add(new EventoHistorial
                 {
@@ -177,7 +175,6 @@ namespace AICodeWars
                     Tipo = "Cambio de estado",
                     Descripcion = "Abierto → En seguimiento"
                 });
-
                 Guardar();
             }
         }
@@ -185,109 +182,74 @@ namespace AICodeWars
         public void AgregarActividad(string id, string descripcion)
         {
             descripcion = Validar(descripcion, "Descripción de actividad");
-
             lock (bloqueo)
             {
                 var e = BuscarInterno(id);
-
                 if (e.Estado == "Cerrado")
-                    throw new InvalidOperationException(
-                        "Un expediente cerrado no admite actividades.");
-
+                    throw new InvalidOperationException("Un expediente cerrado no admite actividades.");
                 e.Historial.Add(new EventoHistorial
                 {
                     FechaHora = DateTime.Now,
                     Tipo = "Actividad",
                     Descripcion = descripcion
                 });
-
                 Guardar();
             }
         }
 
-
         public void CerrarExpediente(string id, string motivo)
         {
             motivo = Validar(motivo, "Motivo de cierre");
-
             lock (bloqueo)
             {
                 var e = BuscarInterno(id);
-
-                // Solo se pueden cerrar expedientes en seguimiento.
                 if (e.Estado != "En seguimiento")
-                {
-                    throw new InvalidOperationException(
-                        "Solo puede cerrarse un expediente en seguimiento.");
-                }
+                    throw new InvalidOperationException("Solo se puede cerrar un expediente en seguimiento.");
 
-                // Buscar la última reapertura.
-                int ultimoReinicio = e.Historial.FindLastIndex(h =>
-                    h.Tipo == "Reapertura");
-
-                // Comprobar que existe una actividad posterior
-                // a la última reapertura.
-                bool tieneActividad = e.Historial
-                    .Skip(ultimoReinicio + 1)
+                // Para cierres posteriores a una reapertura, exigir actividad nueva.
+                int ultimaReapertura = e.Historial.FindLastIndex(h => h.Tipo == "Reapertura");
+                bool existeActividad = e.Historial.Skip(ultimaReapertura + 1)
                     .Any(h => h.Tipo == "Actividad");
+                if (!existeActividad)
+                    throw new InvalidOperationException("Debe registrarse al menos una actividad antes del cierre.");
 
-                if (!tieneActividad)
-                {
-                    throw new InvalidOperationException(
-                        "Debe existir al menos una actividad antes del cierre.");
-                }
-
-                // Cambiar el estado del expediente.
                 e.Estado = "Cerrado";
-
-                // Registrar el cierre sin borrar eventos anteriores.
                 e.Historial.Add(new EventoHistorial
                 {
                     FechaHora = DateTime.Now,
                     Tipo = "Cierre",
                     Descripcion = "En seguimiento → Cerrado. Motivo: " + motivo
                 });
-
-                // Guardar todos los cambios.
                 Guardar();
             }
         }
 
-
         public void ReabrirExpediente(string id, string motivo)
         {
             motivo = Validar(motivo, "Motivo de reapertura");
-
             lock (bloqueo)
             {
                 var e = BuscarInterno(id);
-
                 if (e.Estado != "Cerrado")
-                    throw new InvalidOperationException(
-                        "Solamente pueden reabrirse expedientes cerrados.");
-
+                    throw new InvalidOperationException("Solo pueden reabrirse expedientes cerrados.");
                 e.Estado = "En seguimiento";
-
                 e.Historial.Add(new EventoHistorial
                 {
                     FechaHora = DateTime.Now,
                     Tipo = "Reapertura",
                     Descripcion = "Cerrado → En seguimiento. Motivo: " + motivo
                 });
-
                 Guardar();
             }
         }
 
+        // Solo llamar dentro de lock(bloqueo).
         private Expediente BuscarInterno(string id)
         {
             var e = expedientes.FirstOrDefault(x =>
-                x.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
-
-            return e ?? throw new InvalidOperationException(
-                "El expediente solicitado no existe.");
+                x.Id.Equals(id ?? "", StringComparison.OrdinalIgnoreCase));
+            return e ?? throw new InvalidOperationException("El expediente no existe.");
         }
-
 
         private static Expediente Copiar(Expediente original)
         {
