@@ -8,7 +8,7 @@ public class Class1
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
-// PÁGINA PRINCIPAL DEL BUFETE POPULAR
+// ÁGINA PRINCIPAL DEL BUFETE POPULAR
 app.MapGet("/", () => Results.Content("""
 <!DOCTYPE html>
 <html lang="es">

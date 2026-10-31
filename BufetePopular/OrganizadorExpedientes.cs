@@ -1,15 +1,8 @@
 ﻿using System;
-
-public class Class1
-{
-	public Class1()
-	{
-
-        using System;
-        using System.Collections.Generic;
-        using System.IO;
-        using System.Linq;
-        using System.Text.Json;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
 
 namespace AICodeWars
 {
@@ -29,7 +22,6 @@ namespace AICodeWars
         public string? Categoria { get; set; }
         public DateTime FechaApertura { get; set; }
         public string Estado { get; set; } = "Abierto";
-
         public List<EventoHistorial> Historial { get; set; } = new();
     }
 
@@ -45,30 +37,25 @@ namespace AICodeWars
             expedientes = Cargar();
         }
 
-        // Recuperar expedientes previamente almacenados
         private List<Expediente> Cargar()
         {
             if (!File.Exists(rutaArchivo))
                 return new List<Expediente>();
 
             string json = File.ReadAllText(rutaArchivo);
-
             return JsonSerializer.Deserialize<List<Expediente>>(json)
-                   ?? new List<Expediente>();
+                ?? new List<Expediente>();
         }
 
-        // Guardar todos los cambios
         private void Guardar()
         {
             string? carpeta = Path.GetDirectoryName(rutaArchivo);
-
             if (!string.IsNullOrEmpty(carpeta))
                 Directory.CreateDirectory(carpeta);
 
             string json = JsonSerializer.Serialize(
                 expedientes,
-                new JsonSerializerOptions { WriteIndented = true }
-            );
+                new JsonSerializerOptions { WriteIndented = true });
 
             File.WriteAllText(rutaArchivo, json);
         }
@@ -76,13 +63,11 @@ namespace AICodeWars
         private static string Validar(string? valor, string campo)
         {
             if (string.IsNullOrWhiteSpace(valor))
-                throw new ArgumentException(
-                    $"El campo {campo} es obligatorio.");
+                throw new ArgumentException($"El campo {campo} es obligatorio.");
 
             return valor.Trim();
         }
 
-        // 1. Crear expediente
         public Expediente CrearExpediente(
             string solicitante,
             string asunto,
@@ -96,12 +81,9 @@ namespace AICodeWars
             if (!string.IsNullOrWhiteSpace(categoria))
             {
                 categoria = categoria.Trim();
-
                 if (!new[] { "Civil", "Familiar", "Laboral" }
                     .Contains(categoria, StringComparer.OrdinalIgnoreCase))
-                {
                     throw new ArgumentException("Categoría no válida.");
-                }
             }
             else
             {
@@ -111,7 +93,6 @@ namespace AICodeWars
             lock (bloqueo)
             {
                 DateTime ahora = DateTime.Now;
-
                 Expediente nuevo = new Expediente
                 {
                     Id = Guid.NewGuid().ToString("N"),
@@ -134,12 +115,10 @@ namespace AICodeWars
 
                 expedientes.Add(nuevo);
                 Guardar();
-
                 return Copiar(nuevo);
             }
         }
 
-        // 2. Consultar todos los expedientes
         public List<Expediente> ListarExpedientes()
         {
             lock (bloqueo)
@@ -151,14 +130,12 @@ namespace AICodeWars
             }
         }
 
-        // 3. Buscar por identificador o nombre/alias
         public List<Expediente> BuscarExpedientes(string? texto)
         {
             if (string.IsNullOrWhiteSpace(texto))
                 return ListarExpedientes();
 
             texto = texto.Trim();
-
             lock (bloqueo)
             {
                 return expedientes
@@ -170,7 +147,6 @@ namespace AICodeWars
             }
         }
 
-        // 4. Consultar detalle e historial
         public Expediente? ObtenerExpediente(string id)
         {
             if (string.IsNullOrWhiteSpace(id))
@@ -179,14 +155,140 @@ namespace AICodeWars
             lock (bloqueo)
             {
                 var encontrado = expedientes.FirstOrDefault(
-                    e => e.Id.Equals(id.Trim(),
-                        StringComparison.OrdinalIgnoreCase));
-
+                    e => e.Id.Equals(id.Trim(), StringComparison.OrdinalIgnoreCase));
                 return encontrado == null ? null : Copiar(encontrado);
             }
         }
 
-        // 5. Generar copia para proteger datos internos
+        public void IniciarSeguimiento(string id)
+        {
+            lock (bloqueo)
+            {
+                var e = BuscarInterno(id);
+
+                if (e.Estado != "Abierto")
+                    throw new InvalidOperationException(
+                        "Solo los expedientes abiertos pueden pasar a seguimiento.");
+
+                e.Estado = "En seguimiento";
+                e.Historial.Add(new EventoHistorial
+                {
+                    FechaHora = DateTime.Now,
+                    Tipo = "Cambio de estado",
+                    Descripcion = "Abierto → En seguimiento"
+                });
+
+                Guardar();
+            }
+        }
+
+        public void AgregarActividad(string id, string descripcion)
+        {
+            descripcion = Validar(descripcion, "Descripción de actividad");
+
+            lock (bloqueo)
+            {
+                var e = BuscarInterno(id);
+
+                if (e.Estado == "Cerrado")
+                    throw new InvalidOperationException(
+                        "Un expediente cerrado no admite actividades.");
+
+                e.Historial.Add(new EventoHistorial
+                {
+                    FechaHora = DateTime.Now,
+                    Tipo = "Actividad",
+                    Descripcion = descripcion
+                });
+
+                Guardar();
+            }
+        }
+
+
+        public void CerrarExpediente(string id, string motivo)
+        {
+            motivo = Validar(motivo, "Motivo de cierre");
+
+            lock (bloqueo)
+            {
+                var e = BuscarInterno(id);
+
+                // Solo se pueden cerrar expedientes en seguimiento.
+                if (e.Estado != "En seguimiento")
+                {
+                    throw new InvalidOperationException(
+                        "Solo puede cerrarse un expediente en seguimiento.");
+                }
+
+                // Buscar la última reapertura.
+                int ultimoReinicio = e.Historial.FindLastIndex(h =>
+                    h.Tipo == "Reapertura");
+
+                // Comprobar que existe una actividad posterior
+                // a la última reapertura.
+                bool tieneActividad = e.Historial
+                    .Skip(ultimoReinicio + 1)
+                    .Any(h => h.Tipo == "Actividad");
+
+                if (!tieneActividad)
+                {
+                    throw new InvalidOperationException(
+                        "Debe existir al menos una actividad antes del cierre.");
+                }
+
+                // Cambiar el estado del expediente.
+                e.Estado = "Cerrado";
+
+                // Registrar el cierre sin borrar eventos anteriores.
+                e.Historial.Add(new EventoHistorial
+                {
+                    FechaHora = DateTime.Now,
+                    Tipo = "Cierre",
+                    Descripcion = "En seguimiento → Cerrado. Motivo: " + motivo
+                });
+
+                // Guardar todos los cambios.
+                Guardar();
+            }
+        }
+
+
+        public void ReabrirExpediente(string id, string motivo)
+        {
+            motivo = Validar(motivo, "Motivo de reapertura");
+
+            lock (bloqueo)
+            {
+                var e = BuscarInterno(id);
+
+                if (e.Estado != "Cerrado")
+                    throw new InvalidOperationException(
+                        "Solamente pueden reabrirse expedientes cerrados.");
+
+                e.Estado = "En seguimiento";
+
+                e.Historial.Add(new EventoHistorial
+                {
+                    FechaHora = DateTime.Now,
+                    Tipo = "Reapertura",
+                    Descripcion = "Cerrado → En seguimiento. Motivo: " + motivo
+                });
+
+                Guardar();
+            }
+        }
+
+        private Expediente BuscarInterno(string id)
+        {
+            var e = expedientes.FirstOrDefault(x =>
+                x.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+
+            return e ?? throw new InvalidOperationException(
+                "El expediente solicitado no existe.");
+        }
+
+
         private static Expediente Copiar(Expediente original)
         {
             return new Expediente
@@ -209,7 +311,4 @@ namespace AICodeWars
             };
         }
     }
-}
-
-	}
 }

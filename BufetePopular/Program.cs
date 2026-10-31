@@ -533,6 +533,56 @@ app.MapGet("/expedientes/{id}",
         html.Append("<p><b>Apertura:</b> " +
             e.FechaApertura.ToString("dd/MM/yyyy HH:mm") + "</p>");
 
+
+        html.Append("<h2>Gestión del estado</h2>");
+
+        if (e.Estado == "Abierto")
+        {
+            html.Append(
+                "<p>Este expediente está abierto.</p>" +
+                "<form method='post' action='/historial/" +
+                Uri.EscapeDataString(e.Id) + "/accion'>" +
+                "<input type='hidden' name='accion' value='seguimiento'>" +
+                "<button type='submit'>Pasar a seguimiento</button>" +
+                "</form>"
+            );
+        }
+        else if (e.Estado == "En seguimiento")
+        {
+            html.Append(
+                "<p>Este expediente está en seguimiento.</p>" +
+                "<p>Debes registrar una actividad antes de cerrarlo.</p>" +
+                "<form method='post' action='/historial/" +
+                Uri.EscapeDataString(e.Id) + "/accion'>" +
+                "<input type='hidden' name='accion' value='cerrar'>" +
+                "<textarea name='motivo' required " +
+                "placeholder='Escribe el motivo de cierre' " +
+                "style='width:95%;padding:12px'></textarea>" +
+                "<p><button type='submit'>Cerrar expediente</button></p>" +
+                "</form>"
+            );
+        }
+        else if (e.Estado == "Cerrado")
+        {
+            html.Append(
+                "<p>Este expediente está cerrado.</p>" +
+                "<form method='post' action='/historial/" +
+                Uri.EscapeDataString(e.Id) + "/accion'>" +
+                "<input type='hidden' name='accion' value='reabrir'>" +
+                "<textarea name='motivo' required " +
+                "placeholder='Motivo de reapertura' " +
+                "style='width:95%;padding:12px'></textarea>" +
+                "<p><button type='submit'>Reabrir expediente</button></p>" +
+                "</form>"
+            );
+        }
+
+        html.Append(
+            "<p><a href='/historial/" +
+            Uri.EscapeDataString(e.Id) +
+            "'>Registrar actividades y consultar seguimiento</a></p>"
+        );
+
         html.Append("<h2>Historial</h2>");
 
         foreach (var evento in e.Historial.OrderBy(h => h.FechaHora))
@@ -543,6 +593,11 @@ app.MapGet("/expedientes/{id}",
                 evento.FechaHora.ToString("dd/MM/yyyy HH:mm") +
                 "</small></div>");
         }
+        html.Append(
+    "<p><a href='/historial/" +
+    Uri.EscapeDataString(e.Id) +
+    "'>Administrar historial y seguimiento →</a></p>"
+);
 
         html.Append("<p><a href='/expedientes'>Volver al listado</a></p>");
 
@@ -552,7 +607,199 @@ app.MapGet("/expedientes/{id}",
     });
 
 // Acceso al historial desde la página principal
-app.MapGet("/historial", () => Results.Redirect("/expedientes"));
+
+// LISTA DE EXPEDIENTES PARA CONSULTAR HISTORIAL
+app.MapGet("/historial", (OrganizadorExpedientes organizador) =>
+{
+    var html = new StringBuilder();
+
+    html.Append("<h1>Historial y seguimiento</h1>");
+    html.Append("<p>Seleccione un expediente para consultar sus movimientos.</p>");
+
+    var lista = organizador.ListarExpedientes();
+
+    if (lista.Count == 0)
+    {
+        html.Append("<p>No existen expedientes registrados.</p>");
+    }
+    else
+    {
+        html.Append("<table><tr><th>Solicitante</th><th>Estado</th><th>Acción</th></tr>");
+
+        foreach (var e in lista)
+        {
+            html.Append("<tr><td>" +
+                WebUtility.HtmlEncode(e.Solicitante) +
+                "</td><td>" +
+                WebUtility.HtmlEncode(e.Estado) +
+                "</td><td><a href='/historial/" +
+                Uri.EscapeDataString(e.Id) +
+                "'>Ver historial</a></td></tr>");
+        }
+
+        html.Append("</table>");
+    }
+
+    return Results.Content(
+        PaginaSimple("Historial", html.ToString()),
+        "text/html; charset=utf-8");
+});
+
+// HISTORIAL Y ACCIONES SOBRE UN EXPEDIENTE
+app.MapGet("/historial/{id}",
+    (string id, OrganizadorExpedientes organizador) =>
+    {
+        var e = organizador.ObtenerExpediente(id);
+
+        if (e == null)
+            return Results.NotFound("Expediente no encontrado.");
+
+        var html = new StringBuilder();
+
+        string Seguro(string? s) => WebUtility.HtmlEncode(s ?? "");
+
+        string ruta = "/historial/" + Uri.EscapeDataString(e.Id) + "/accion";
+
+        html.Append("<h1>Historial del expediente</h1>");
+        html.Append("<p><b>Solicitante:</b> " + Seguro(e.Solicitante) + "</p>");
+        html.Append("<p><b>Responsable:</b> " + Seguro(e.Responsable) + "</p>");
+        html.Append("<p><b>Estado actual:</b> " + Seguro(e.Estado) + "</p>");
+
+        html.Append("<h2>Movimientos registrados</h2>");
+
+        foreach (var h in e.Historial.OrderBy(x => x.FechaHora))
+        {
+            html.Append("<div class='evento'>");
+            html.Append("<b>" + Seguro(h.Tipo) + "</b>");
+            html.Append("<p>" + Seguro(h.Descripcion) + "</p>");
+            html.Append("<small>" +
+                h.FechaHora.ToString("dd/MM/yyyy HH:mm:ss") +
+                "</small>");
+            html.Append("</div>");
+        }
+
+        html.Append("<h2>Administrar expediente</h2>");
+
+        // Registrar actividad: solo si no está cerrado
+        if (e.Estado != "Cerrado")
+        {
+            html.Append($"""
+            <form method="post" action="{ruta}">
+                <h3>Registrar actividad</h3>
+                <input type="hidden" name="accion" value="actividad">
+                <textarea name="descripcion" required
+                    placeholder="Descripción de la actividad"
+                    style="width:95%;padding:12px;min-height:80px"></textarea>
+                <p><button type="submit">Guardar actividad</button></p>
+            </form>
+            """);
+        }
+
+        // Abierto -> En seguimiento
+        if (e.Estado == "Abierto")
+        {
+            html.Append($"""
+            <form method="post" action="{ruta}">
+                <input type="hidden" name="accion" value="seguimiento">
+                <button type="submit">Iniciar seguimiento</button>
+            </form>
+            """);
+        }
+
+        // En seguimiento -> Cerrado
+        if (e.Estado == "En seguimiento")
+        {
+            html.Append($"""
+            <form method="post" action="{ruta}">
+                <h3>Cerrar expediente</h3>
+                <input type="hidden" name="accion" value="cerrar">
+                <textarea name="motivo" required
+                    placeholder="Motivo de cierre"
+                    style="width:95%;padding:12px"></textarea>
+                <p><button type="submit">Cerrar expediente</button></p>
+            </form>
+            """);
+        }
+
+        // Cerrado -> En seguimiento
+        if (e.Estado == "Cerrado")
+        {
+            html.Append($"""
+            <form method="post" action="{ruta}">
+                <h3>Reabrir expediente</h3>
+                <p>Ingrese el motivo de reapertura.</p>
+                <input type="hidden" name="accion" value="reabrir">
+                <textarea name="motivo" required
+                    placeholder="Motivo de reapertura"
+                    style="width:95%;padding:12px"></textarea>
+                <p><button type="submit">Reabrir expediente</button></p>
+            </form>
+            """);
+        }
+
+        html.Append("<p><a href='/historial'>← Volver al historial</a></p>");
+
+        return Results.Content(
+            PaginaSimple("Historial del expediente", html.ToString()),
+            "text/html; charset=utf-8");
+    });
+
+// PROCESAR LAS ACCIONES DEL HISTORIAL
+app.MapPost("/historial/{id}/accion",
+    async (string id, HttpRequest request,
+        OrganizadorExpedientes organizador) =>
+    {
+        var form = await request.ReadFormAsync();
+
+        string accion = form["accion"].ToString();
+        string motivo = form["motivo"].ToString();
+        string descripcion = form["descripcion"].ToString();
+
+        try
+        {
+            switch (accion)
+            {
+                case "seguimiento":
+                    organizador.IniciarSeguimiento(id);
+                    break;
+
+                case "actividad":
+                    organizador.AgregarActividad(id, descripcion);
+                    break;
+
+                case "cerrar":
+                    organizador.CerrarExpediente(id, motivo);
+                    break;
+
+                case "reabrir":
+                    organizador.ReabrirExpediente(id, motivo);
+                    break;
+
+                default:
+                    throw new ArgumentException("Acción no válida.");
+            }
+
+            return Results.Redirect(
+                "/historial/" + Uri.EscapeDataString(id));
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException ||
+            ex is InvalidOperationException)
+        {
+            string mensaje = WebUtility.HtmlEncode(ex.Message);
+
+            return Results.Content(
+                PaginaSimple("No se pudo completar la acción",
+                    "<h2>Operación rechazada</h2><p>" +
+                    mensaje +
+                    "</p><a href='/historial/" +
+                    Uri.EscapeDataString(id) +
+                    "'>Volver al expediente</a>"),
+                "text/html; charset=utf-8",
+                statusCode: 400);
+        }
+    });
+
 
 app.Run();
 
